@@ -1,5 +1,7 @@
 # HANDOFF — Hunt: Showdown 资产预览器项目交接
 > 写给下一个接手工作的 LLM/助手。读这份+PLAN.md+README.txt 就能接着干。
+> **代码仓库: git@github.com:204343414/Hunt1896PAK.git**(私钥=本目录 id_huntview,
+> 勿提交勿贴出)。改动流程: 改 /home/user/huntview/ → git add/commit → `GIT_SSH_COMMAND="ssh -i id_huntview -o IdentitiesOnly=yes" git push origin main`。
 
 ## 项目是什么
 
