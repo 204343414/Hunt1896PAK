@@ -206,13 +206,12 @@ class AssetIndex:
 
     def search(self, q, limit=300):
         q = q.lower()
-        hits = []
+        hits, rest = [], []
         for low, (_k, _c, _cs, us, _o, _m, path) in self.files.items():
             if q in low:
-                hits.append({'path': path, 'size': us})
-                if len(hits) >= limit:
-                    break
-        return hits
+                # cdf 装配单优先(整模入口), 其次可预览几何, 杂件殿后
+                (hits if low.endswith('.cdf') else rest).append({'path': path, 'size': us})
+        return (hits + rest)[:limit]
 
 
 # ════════════════════════ 模型/动画/材质/贴图解析 ════════════════════════
