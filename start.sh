@@ -3,15 +3,27 @@
 # 只读浏览, 绝不动游戏文件。
 cd "$(dirname "$0")"
 
-# 0) 如果这份是 git 克隆来的 → 运行前同步 GitHub 最新版
+# 0) 如果这份是 git 克隆来的 → 运行前同步 GitHub 最新版(版本不同就整包覆盖)
 if [ -d .git ] && command -v git >/dev/null 2>&1; then
     K="$PWD/id_huntview"
     [ -f "$K" ] && chmod 600 "$K" 2>/dev/null
-    if [ -f "$K" ]; then
-        GIT_SSH_COMMAND="ssh -i \"$K\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-            git pull --ff-only -q && echo "↻ 与 GitHub 同步: 已是最新/已更新" || echo "⚠ 同步失败(用当前版本继续)"
+    export GIT_SSH_COMMAND="ssh -i \"$K\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    git remote get-url origin 2>/dev/null | grep -q git@ || \
+        git remote set-url origin git@github.com:204343414/Hunt1896PAK.git 2>/dev/null
+    OLD=$(git rev-parse HEAD 2>/dev/null)
+    V0=$(cat VERSION 2>/dev/null)
+    if git pull --ff-only -q origin main 2>/dev/null; then
+        NEW=$(git rev-parse HEAD 2>/dev/null)
+        V1=$(cat VERSION 2>/dev/null)
+        if [ "$OLD" != "$NEW" ]; then
+            echo "⬆ 已从 GitHub 更新: ${V0:-?} → ${V1:-?}"
+            git -C . diff --name-only "$OLD" "$NEW" | grep -q '^start\.sh$' && \
+                echo "⚠ 启动器自己也更新了, 建议退出重跑一次: bash start.sh"
+        else
+            echo "✓ 版本 ${V1:-?} (已是最新)"
+        fi
     else
-        git pull --ff-only -q && echo "↻ 与 GitHub 同步: 已是最新/已更新" || echo "(离线或无 key, 用当前版本)"
+        echo "(同步失败/离线, 用当前版本 ${V0:-?} 继续)"
     fi
 fi
 
