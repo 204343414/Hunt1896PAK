@@ -3,7 +3,17 @@
 # 只读浏览, 绝不动游戏文件。
 cd "$(dirname "$0")"
 
-# 0) 如果这份是 git 克隆来的 → 运行前同步 GitHub 最新版(版本不同就整包覆盖)
+# 0) 无 .git(zip 解压版) → 自动接管为 git 工作树, 之后每次运行都同步覆盖
+if [ ! -d .git ] && command -v git >/dev/null 2>&1 && [ -f huntview.py ]; then
+    K="$PWD/id_huntview"
+    [ -f "$K" ] && chmod 600 "$K" 2>/dev/null
+    export GIT_SSH_COMMAND="ssh -i \"$K\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    echo "↻ 首次接管为 GitHub 同步版…"
+    git init -q -b main && git remote add origin git@github.com:204343414/Hunt1896PAK.git 2>/dev/null
+    git fetch -q --depth 1 origin main 2>/dev/null && git reset -q --hard FETCH_HEAD && \
+        echo "✓ 已接入 GitHub 自动更新(v$(cat VERSION 2>/dev/null))" || echo "(接管失败, 本次按本地文件跑)"
+fi
+# 之后每次: 若 git 追踪中 → 同步 GitHub 最新版(版本不同就整包覆盖)
 if [ -d .git ] && command -v git >/dev/null 2>&1; then
     K="$PWD/id_huntview"
     [ -f "$K" ] && chmod 600 "$K" 2>/dev/null
