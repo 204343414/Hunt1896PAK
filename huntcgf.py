@@ -77,12 +77,21 @@ def read_subsets(by_id, chunk_id):
     return out
 
 
+def qtangent_frame(q):
+    """CryEngine QTangent (4×snorm16 quat) → (normal, tangent, bitangentSign).
+    Object-space TBN: N=q·(0,0,1), T=q·(1,0,0), B=cross(N,T)*sign(w).
+    w 的符号编码镜像 UV(左手 TBN)。"""
+    x = max(-1.0, min(1.0, q[0] / 32767.0))
+    y = max(-1.0, min(1.0, q[1] / 32767.0))
+    z = max(-1.0, min(1.0, q[2] / 32767.0))
+    w = max(-1.0, min(1.0, q[3] / 32767.0))
+    n = (2 * (x * z + w * y), 2 * (y * z - w * x), w * w - x * x - y * y + z * z)
+    t = (1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y))
+    return n, t, (-1.0 if w < 0 else 1.0)
+
+
 def qtangent_normal(q):
-    x = max(-1, min(1, q[0] / 32767.0))
-    y = max(-1, min(1, q[1] / 32767.0))
-    z = max(-1, min(1, q[2] / 32767.0))
-    w = max(-1, min(1, q[3] / 32767.0))
-    return (2 * (x * z + w * y), 2 * (y * z - w * x), w * w - x * x - y * y + z * z)
+    return qtangent_frame(q)[0]
 
 
 def parse_cgf(data: bytes):
@@ -135,7 +144,7 @@ def parse_cgf(data: bytes):
 
         mesh = {'name': '', 'chunkId': c['id'], 'matChunkId': -1,
                 'transform': [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-                'positions': [], 'normals': [], 'uvs': [], 'indices': [],
+                'positions': [], 'normals': [], 'tangents': [], 'uvs': [], 'indices': [],
                 'subsets': [], 'boneWeights': []}
 
         st = get_stream(by_id, stream_ids[SS_POS])

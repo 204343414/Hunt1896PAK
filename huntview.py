@@ -483,6 +483,7 @@ def model_payload(idx: AssetIndex, path: str):
                 'transform': t,
                 'pos': [c for v in m['positions'] for c in v],
                 'nrm': [c for v in m['normals'] for c in v],
+                'tan': [c for v in m.get('tangents') or [] for c in v],
                 'uv': [c for v in m['uvs'] for c in v],
                 'idx': [i for tri in m['indices'] for i in tri],
                 'parts': parts})
@@ -660,6 +661,7 @@ def _assemble_from_attach(idx, cdf, title, default_mtl_d=None):
                 'transform': t,
                 'pos': [c for v in m['positions'] for c in v],
                 'nrm': [c for v in m['normals'] for c in v],
+                'tan': [c for v in m.get('tangents') or [] for c in v],
                 'uv': [c for v in m['uvs'] for c in v],
                 'idx': [i for tri in m['indices'] for i in tri],
                 'parts': parts})
@@ -901,10 +903,10 @@ window.onerror=function(m,s,l){var e=document.getElementById('msg');if(e){e.styl
 const cv=document.getElementById('cv'),gl=cv.getContext('webgl',{antialias:true})||cv.getContext('experimental-webgl');
 if(!gl){document.getElementById('msg').textContent='WebGL 不可用, 换 Chrome/Firefox(目录树仍应能显示)';}
 function rs(){if(!gl)return;cv.width=cv.clientWidth;cv.height=cv.clientHeight;gl.viewport(0,0,cv.width,cv.height)}addEventListener('resize',rs);rs();
-const VS=`attribute vec3 p;attribute vec3 n;attribute vec2 uv;uniform mat4 mvp;uniform mat4 mv;varying vec3 N;varying vec2 UV;varying vec3 VP;
-void main(){gl_Position=mvp*vec4(p,1.);VP=(mv*vec4(p,1.)).xyz;N=mat3(mv)*n;UV=uv;}`;
+const VS=`attribute vec3 p;attribute vec3 n;attribute vec4 tan;attribute vec2 uv;uniform mat4 mvp;uniform mat4 mv;varying vec3 N;varying vec3 T;varying float Ts;varying vec2 UV;varying vec3 VP;
+void main(){gl_Position=mvp*vec4(p,1.);VP=(mv*vec4(p,1.)).xyz;mat3 nm=mat3(mv);N=nm*n;T=nm*tan.xyz;Ts=tan.w;UV=uv;}`;
 const FS=`#extension GL_OES_standard_derivatives:enable
-precision mediump float;varying vec3 N;varying vec2 UV;varying vec3 VP;
+precision mediump float;varying vec3 N;varying vec3 T;varying float Ts;varying vec2 UV;varying vec3 VP;
 uniform vec3 col;uniform float useTex;uniform sampler2D tex;
 uniform float useNrm;uniform sampler2D nrm;uniform float useSpec;uniform sampler2D spec;
 void main(){
@@ -912,16 +914,19 @@ void main(){
  float gloss=.16;
  if(useNrm>.5){
   vec4 ns=texture2D(nrm,UV);
-  vec2 xy=(ns.a<0.985)?vec2(ns.a,ns.g):ns.rg;
-  if(ns.a<0.985)gloss=ns.a;
-  vec3 t=vec3(xy*2.-1.,1.);
-  t.z=sqrt(max(.04,1.-dot(t.xy,t.xy)));
-  vec3 q0=dFdx(VP),q1=dFdy(VP);vec2 s0=dFdx(UV),s1=dFdy(UV);
-  vec3 S=q0*s1.t-q1*s0.t;
-  S=normalize(S-NN*dot(NN,S));
-  vec3 B=cross(NN,S);
-  float hnd=sign(s0.s*s1.t-s1.s*s0.t);if(hnd==0.)hnd=1.;B*=hnd;
-  NN=normalize(S*t.x+B*t.y+NN*t.z);}
+  vec3 nts;
+  if(ns.b<0.02&&ns.a>0.98){nts.xy=ns.rg*2.-1.;nts.z=sqrt(max(.04,1.-dot(nts.xy,nts.xy)));}
+  else {nts=ns.rgb*2.-1.;if(ns.a<0.98)gloss=ns.a;}
+  nts.y=-nts.y;
+  nts=normalize(nts);
+  vec3 TT=T;float tl=dot(TT,TT);
+  vec3 Btn;
+  if(tl>0.01){TT=normalize(TT);Btn=normalize(cross(NN,TT)*Ts);}
+  else {
+   vec3 q0=dFdx(VP),q1=dFdy(VP);vec2 s0=dFdx(UV),s1=dFdy(UV);
+   TT=q0*s1.t-q1*s0.t;TT=normalize(TT-NN*dot(NN,TT));
+   Btn=cross(NN,TT);float hnd=sign(s0.s*s1.t-s1.s*s0.t);if(hnd==0.)hnd=1.;Btn*=hnd;}
+  NN=normalize(TT*nts.x+Btn*nts.y+NN*nts.z);}
  vec3 V=normalize(-VP);
  vec3 L1=normalize(vec3(.42,.72,.55)),L2=normalize(vec3(-.55,.15,-.6));
  vec3 base=col;
@@ -970,7 +975,7 @@ function loadTex(url){
  return slot;}
 function loadModel(D, append){
  if(!append){
-  for(const m of models){gl.deleteBuffer(m.pb);gl.deleteBuffer(m.ib);m.nb&&gl.deleteBuffer(m.nb);m.wb&&gl.deleteBuffer(m.wb);m.uvb&&gl.deleteBuffer(m.uvb);for(const P of m.parts||[])gl.deleteBuffer(P.ib)}
+  for(const m of models){gl.deleteBuffer(m.pb);gl.deleteBuffer(m.ib);m.nb&&gl.deleteBuffer(m.nb);m.tb&&gl.deleteBuffer(m.tb);m.wb&&gl.deleteBuffer(m.wb);m.uvb&&gl.deleteBuffer(m.uvb);for(const P of m.parts||[])gl.deleteBuffer(P.ib)}
   models=[];boneN=0;}
  for(const M of D.models){if(!M.pos||!M.pos.length)continue;
   const pos=new Float32Array(M.pos),idx=new Uint32Array(M.idx),t=M.transform;
@@ -980,7 +985,14 @@ function loadModel(D, append){
    for(let a=0;a<3;a++){const v=pos[i+a];if(v<mn[a])mn[a]=v;if(v>mx[a])mx[a]=v}}
   const pb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,pb);gl.bufferData(gl.ARRAY_BUFFER,pos,gl.STATIC_DRAW);
   const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,idx,gl.STATIC_DRAW);
-  let nb=null;if(M.nrm&&M.nrm.length===M.pos.length){nb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,nb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(M.nrm),gl.STATIC_DRAW)}
+  let nb=null;if(M.nrm&&M.nrm.length===M.pos.length){const nrm=new Float32Array(M.nrm);
+  for(let i=0;i<nrm.length;i+=3){const x=nrm[i],y=nrm[i+1],z=nrm[i+2];
+   nrm[i]=t[0]*x+t[4]*y+t[8]*z;nrm[i+1]=t[1]*x+t[5]*y+t[9]*z;nrm[i+2]=t[2]*x+t[6]*y+t[10]*z;}
+  nb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,nb);gl.bufferData(gl.ARRAY_BUFFER,nrm,gl.STATIC_DRAW)}
+  let tb=null;if(M.tan&&M.tan.length===M.pos.length/3*4){const tan=new Float32Array(M.tan);
+  for(let i=0;i<tan.length;i+=4){const x=tan[i],y=tan[i+1],z=tan[i+2];
+   tan[i]=t[0]*x+t[4]*y+t[8]*z;tan[i+1]=t[1]*x+t[5]*y+t[9]*z;tan[i+2]=t[2]*x+t[6]*y+t[10]*z;}
+  tb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,tb);gl.bufferData(gl.ARRAY_BUFFER,tan,gl.STATIC_DRAW)}
   const w=new Uint32Array(idx.length*2);for(let f=0;f<idx.length/3;f++){w[f*6]=idx[f*3];w[f*6+1]=idx[f*3+1];w[f*6+2]=idx[f*3+1];w[f*6+3]=idx[f*3+2];w[f*6+4]=idx[f*3+2];w[f*6+5]=idx[f*3]}
   const wb=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,wb);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,w,gl.STATIC_DRAW);
   let uvb=null;if(M.uv&&M.uv.length===M.pos.length/3*2){uvb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,uvb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(M.uv),gl.STATIC_DRAW)}
@@ -995,7 +1007,7 @@ function loadModel(D, append){
     if(MM.bump)slotN=loadTex('/api/tex?path='+encodeURIComponent(MM.bump));
     if(MM.spec)slotS=loadTex('/api/tex?path='+encodeURIComponent(MM.spec));}
    parts.push({ib:pib,n:P.count,tex:slot,nre:slotN,spe:slotS});}
-  models.push({pb,ib,nb,uvb,wb,n:idx.length,mn,mx,col,parts});}
+  models.push({pb,ib,nb,tb,uvb,wb,n:idx.length,mn,mx,col,parts});}
  let allmn=[1e9,1e9,1e9],allmx=[-1e9,-1e9,-1e9];
  for(const m of models)for(let a=0;a<3;a++){allmn[a]=Math.min(allmn[a],m.mn[a]);allmx[a]=Math.max(allmx[a],m.mx[a])}
  if(models.length){ctr=[(allmn[0]+allmx[0])/2,(allmn[1]+allmx[1])/2,(allmn[2]+allmx[2])/2];
@@ -1023,13 +1035,15 @@ function draw(){
   uUT=gl.getUniformLocation(P,'useTex'),uTX=gl.getUniformLocation(P,'tex'),
   uUN=gl.getUniformLocation(P,'useNrm'),uNM=gl.getUniformLocation(P,'nrm'),
   uUS=gl.getUniformLocation(P,'useSpec'),uSP=gl.getUniformLocation(P,'spec');
- const aP=gl.getAttribLocation(P,'p'),aN=gl.getAttribLocation(P,'n'),aUV=gl.getAttribLocation(P,'uv');
+ const aP=gl.getAttribLocation(P,'p'),aN=gl.getAttribLocation(P,'n'),aT=gl.getAttribLocation(P,'tan'),aUV=gl.getAttribLocation(P,'uv');
  gl.uniformMatrix4fv(uM,false,mvp);gl.uniformMatrix4fv(uV,false,vw);
  gl.uniform1i(uTX,0);gl.uniform1i(uNM,1);gl.uniform1i(uSP,2);
  for(const m of models){
   gl.bindBuffer(gl.ARRAY_BUFFER,m.pb);gl.enableVertexAttribArray(aP);gl.vertexAttribPointer(aP,3,gl.FLOAT,false,0,0);
   if(m.nb){gl.bindBuffer(gl.ARRAY_BUFFER,m.nb);gl.enableVertexAttribArray(aN);gl.vertexAttribPointer(aN,3,gl.FLOAT,false,0,0)}
   else gl.disableVertexAttribArray(aN),gl.vertexAttrib3f(aN,0,0,1);
+  if(aT>=0){if(m.tb){gl.bindBuffer(gl.ARRAY_BUFFER,m.tb);gl.enableVertexAttribArray(aT);gl.vertexAttribPointer(aT,4,gl.FLOAT,false,0,0)}
+   else gl.disableVertexAttribArray(aT),gl.vertexAttrib4f(aT,0,0,0,1);}
   gl.uniform3fv(uC,m.col);
   if(wire){gl.uniform1f(uUT,0);if(aUV>=0)gl.disableVertexAttribArray(aUV);
    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,m.wb);gl.drawElements(gl.LINES,m.n*2,gl.UNSIGNED_INT,0);continue}
