@@ -825,11 +825,12 @@ def audio_convert(idx: AssetIndex, path: str) -> bytes:
                 with open(ogg, 'rb') as f:
                     return f.read()
             errs.append((r.stderr or r.stdout).decode('utf-8', 'replace')[:120])
-    # 2) ffmpeg (Hunt 新包大量 Opus)
+    # 2) ffmpeg (Hunt 新包大量 Opus; 无 libvorbis 时改出 wav)
     ff = shutil.which('ffmpeg')
     if ff:
+        wav = ogg + '.wav'
         for out, extra in ((ogg, ['-c:a', 'libvorbis', '-q:a', '4']),
-                           (ogg + '.opus', ['-c:a', 'copy'])):
+                           (wav, ['-c:a', 'pcm_s16le'])):
             r = subprocess.run(
                 [ff, '-y', '-loglevel', 'error', '-i', wem] + extra + [out],
                 capture_output=True, timeout=180)
@@ -840,7 +841,7 @@ def audio_convert(idx: AssetIndex, path: str) -> bytes:
                     pass
                 with open(out, 'rb') as f:
                     return f.read()
-            errs.append('ffmpeg: ' + (r.stderr or b'').decode('utf-8', 'replace')[:120])
+            errs.append('ffmpeg: ' + (r.stderr or b'').decode('utf-8', 'replace')[:160])
     # 3) vgmstream
     vg = shutil.which('vgmstream-cli') or shutil.which('vgmstream123')
     if vg and 'vgmstream-cli' in vg:
@@ -1511,7 +1512,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                   {'Cache-Control': 'max-age=86400'})
             if u.path == '/api/audio':
                 data = audio_convert(IDX, path)
-                return self._send(data, 'audio/ogg', 200,
+                mime = 'audio/ogg'
+                if data[:4] == b'RIFF':
+                    mime = 'audio/wav'
+                elif data[:4] == b'fLaC':
+                    mime = 'audio/flac'
+                elif data[:4] == b'OggS' and b'OpusHead' in data[:80]:
+                    mime = 'audio/ogg; codecs=opus'
+                return self._send(data, mime, 200,
                                   {'Cache-Control': 'max-age=86400'})
             if u.path == '/api/raw':
                 data = IDX.read(path)
