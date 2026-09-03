@@ -879,7 +879,7 @@ button.on{background:#6b5a33;color:#ffe9a8}
 </div>
 <div id="main"><canvas id="cv"></canvas>
  <div id="top"><span class="grow"><b id="cur">未选择</b><span id="info"></span></span>
-  <button id="bwire">线框</button><button id="bbone" class="on">骨架</button><button id="btex" class="on">贴图</button><button id="bnrm" class="on">法线</button><button id="bspec">高光</button>
+  <button id="bwire">线框</button><button id="bbone" class="on">骨架</button><button id="btex" class="on">贴图</button><button id="bnrm" class="on">法线</button><button id="bspec">高光</button><button id="bdbg">原法线</button>
   <button id="bshot" title="截图">📷</button><button id="breset">复位</button><button id="bglb" style="display:none">导出 glTF</button><button id="bdl" style="display:none">下载原始文件</button></div>
  <div id="msg">← 左边点开目录或搜索<br>角色模型在 characters/ · 武器在 characters/weapons/<br>静态物件在 objects/</div>
  <div id="anim" style="display:none"><h2>🎞️ 相关动画</h2><div id="anims"></div></div>
@@ -909,7 +909,9 @@ const FS=`#extension GL_OES_standard_derivatives:enable
 precision mediump float;varying vec3 N;varying vec3 T;varying float Ts;varying vec2 UV;varying vec3 VP;
 uniform vec3 col;uniform float useTex;uniform sampler2D tex;
 uniform float useNrm;uniform sampler2D nrm;uniform float useSpec;uniform sampler2D spec;
+uniform float dbgNrm;
 void main(){
+ if(dbgNrm>.5){gl_FragColor=vec4(texture2D(nrm,UV).rgb,1.);return;}
  vec3 NN=normalize(N);
  float gloss=.16;
  if(useNrm>.5){
@@ -952,26 +954,28 @@ cv.oncontextmenu=e=>e.preventDefault();
 cv.onwheel=e=>{dist*=e.deltaY>0?1.12:.89;e.preventDefault()};
 function mul(a,b){const r=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++)for(let k=0;k<4;k++)r[j*4+i]+=a[k*4+i]*b[j*4+k];return r}
 function persp(f,a,n,fr){const t=1/Math.tan(f/2);return new Float32Array([t/a,0,0,0,0,t,0,0,0,0,(fr+n)/(n-fr),-1,0,0,2*fr*n/(n-fr),0])}
-let models=[],boneBuf=null,boneN=0,showBones=true,wire=false,texOn=true,nrmOn=true,specOn=false,span=1,ctr=[0,0,0];
+let models=[],boneBuf=null,boneN=0,showBones=true,wire=false,texOn=true,nrmOn=true,specOn=false,dbgNrm=false,span=1,ctr=[0,0,0];
 const texCache={},rawCache={};
 function fetchRaw(url){
  if(!rawCache[url])rawCache[url]=fetch(url).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer()})
   .then(b=>{const dv=new DataView(b),w=dv.getUint32(0,true),h=dv.getUint32(4,true);
    if(w<1||h<1||w*h*4+8!==b.byteLength)throw 0;return b;});
  return rawCache[url];}
-function uploadTex(g,b){
+function uploadTex(g,b,nomip){
  const dv=new DataView(b),w=dv.getUint32(0,true),h=dv.getUint32(4,true);
  const t=g.createTexture();g.bindTexture(g.TEXTURE_2D,t);
  g.texImage2D(g.TEXTURE_2D,0,g.RGBA,w,h,0,g.RGBA,g.UNSIGNED_BYTE,new Uint8Array(b,8));
- g.texParameteri(g.TEXTURE_2D,g.TEXTURE_MIN_FILTER,g.LINEAR_MIPMAP_LINEAR);
  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_MAG_FILTER,g.LINEAR);
  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_WRAP_S,g.CLAMP_TO_EDGE);
  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_WRAP_T,g.CLAMP_TO_EDGE);
- g.generateMipmap(g.TEXTURE_2D);return t;}
-function loadTex(url){
- if(url in texCache)return texCache[url];
- const slot={tex:null};texCache[url]=slot;
- fetchRaw(url).then(b=>{slot.tex=uploadTex(gl,b)}).catch(()=>{});
+ if(nomip){g.texParameteri(g.TEXTURE_2D,g.TEXTURE_MIN_FILTER,g.LINEAR);}
+ else {g.texParameteri(g.TEXTURE_2D,g.TEXTURE_MIN_FILTER,g.LINEAR_MIPMAP_LINEAR);g.generateMipmap(g.TEXTURE_2D);}
+ return t;}
+function loadTex(url,nomip){
+ const k=url+(nomip?'|n':'');
+ if(k in texCache)return texCache[k];
+ const slot={tex:null};texCache[k]=slot;
+ fetchRaw(url).then(b=>{slot.tex=uploadTex(gl,b,nomip)}).catch(()=>{});
  return slot;}
 function loadModel(D, append){
  if(!append){
@@ -1004,7 +1008,7 @@ function loadModel(D, append){
    let slot=null,slotN=null,slotS=null;const mi=P.mat;
    if(mi>=0&&D.materials&&D.materials[mi]){const MM=D.materials[mi];
     if(MM.diffuse)slot=loadTex('/api/tex?path='+encodeURIComponent(MM.diffuse));
-    if(MM.bump)slotN=loadTex('/api/tex?path='+encodeURIComponent(MM.bump));
+    if(MM.bump)slotN=loadTex('/api/tex?path='+encodeURIComponent(MM.bump),true);
     if(MM.spec)slotS=loadTex('/api/tex?path='+encodeURIComponent(MM.spec));}
    parts.push({ib:pib,n:P.count,tex:slot,nre:slotN,spe:slotS});}
   models.push({pb,ib,nb,tb,uvb,wb,n:idx.length,mn,mx,col,parts});}
@@ -1034,10 +1038,11 @@ function draw(){
  const uM=gl.getUniformLocation(P,'mvp'),uV=gl.getUniformLocation(P,'mv'),uC=gl.getUniformLocation(P,'col'),
   uUT=gl.getUniformLocation(P,'useTex'),uTX=gl.getUniformLocation(P,'tex'),
   uUN=gl.getUniformLocation(P,'useNrm'),uNM=gl.getUniformLocation(P,'nrm'),
-  uUS=gl.getUniformLocation(P,'useSpec'),uSP=gl.getUniformLocation(P,'spec');
+  uUS=gl.getUniformLocation(P,'useSpec'),uSP=gl.getUniformLocation(P,'spec'),
+  uDG=gl.getUniformLocation(P,'dbgNrm');
  const aP=gl.getAttribLocation(P,'p'),aN=gl.getAttribLocation(P,'n'),aT=gl.getAttribLocation(P,'tan'),aUV=gl.getAttribLocation(P,'uv');
  gl.uniformMatrix4fv(uM,false,mvp);gl.uniformMatrix4fv(uV,false,vw);
- gl.uniform1i(uTX,0);gl.uniform1i(uNM,1);gl.uniform1i(uSP,2);
+ gl.uniform1i(uTX,0);gl.uniform1i(uNM,1);gl.uniform1i(uSP,2);if(uDG)gl.uniform1f(uDG,dbgNrm?1:0);
  for(const m of models){
   gl.bindBuffer(gl.ARRAY_BUFFER,m.pb);gl.enableVertexAttribArray(aP);gl.vertexAttribPointer(aP,3,gl.FLOAT,false,0,0);
   if(m.nb){gl.bindBuffer(gl.ARRAY_BUFFER,m.nb);gl.enableVertexAttribArray(aN);gl.vertexAttribPointer(aN,3,gl.FLOAT,false,0,0)}
@@ -1053,7 +1058,7 @@ function draw(){
    const t=P.tex&&P.tex.tex,tn=P.nre&&P.nre.tex,ts=P.spe&&P.spe.tex;
    if(t&&texOn){gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1f(uUT,1)}
    else gl.uniform1f(uUT,0);
-   if(tn&&nrmOn){gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,tn);gl.uniform1f(uUN,1)}
+   if(tn&&(nrmOn||dbgNrm)){gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,tn);gl.uniform1f(uUN,nrmOn?1:0)}
    else gl.uniform1f(uUN,0);
    if(ts&&specOn){gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,ts);gl.uniform1f(uUS,1)}
    else gl.uniform1f(uUS,0);
@@ -1194,6 +1199,7 @@ document.getElementById('bbone').onclick=e=>{showBones=e.target.classList.toggle
 document.getElementById('btex').onclick=e=>{texOn=e.target.classList.toggle('on')};
 document.getElementById('bnrm').onclick=e=>{nrmOn=e.target.classList.toggle('on')};
 document.getElementById('bspec').onclick=e=>{specOn=e.target.classList.toggle('on')};
+document.getElementById('bdbg').onclick=e=>{dbgNrm=e.target.classList.toggle('on')};
 document.getElementById('breset').onclick=()=>{rot=[.6,.8];dist=span*1.8;pan=[0,0,0]};
 // ── 快捷入口 ──
 document.getElementById('qaux').onclick=e=>{showAux=e.target.classList.toggle('on');fillTree()};
