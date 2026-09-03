@@ -922,13 +922,8 @@ void main(){
   nts.z=sqrt(max(.001,1.-dot(nts.xy,nts.xy)));
   if(ns.a<0.99)gloss=ns.a;
   vec3 TT=T;float tl=dot(TT,TT);
-  vec3 Btn;
-  if(tl>0.01){TT=normalize(TT);Btn=normalize(cross(NN,TT)*Ts);}
-  else {
-   vec3 q0=dFdx(VP),q1=dFdy(VP);vec2 s0=dFdx(UV),s1=dFdy(UV);
-   TT=q0*s1.t-q1*s0.t;TT=normalize(TT-NN*dot(NN,TT));
-   Btn=cross(NN,TT);float hnd=sign(s0.s*s1.t-s1.s*s0.t);if(hnd==0.)hnd=1.;Btn*=hnd;}
-  NN=normalize(TT*nts.x+Btn*nts.y+NN*nts.z);}
+  if(tl>0.01){TT=normalize(TT);vec3 Btn=normalize(cross(NN,TT)*Ts);
+   NN=normalize(TT*nts.x+Btn*nts.y+NN*nts.z);}}
  vec3 V=normalize(-VP);
  vec3 L1=normalize(vec3(.42,.72,.55)),L2=normalize(vec3(-.55,.15,-.6));
  vec3 base=col;
