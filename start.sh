@@ -1,33 +1,55 @@
 #!/bin/bash
-# ═══ 猎杀对决 · 资产浏览器 一键启动 (v1.4) ═══
+# ═══ 猎杀对决 · 资产浏览器 一键启动 (v1.5) ═══
 # 只读浏览, 绝不动游戏文件。
 cd "$(dirname "$0")"
 
-# 0) 无 .git(zip 解压版) → 自动接管为 git 工作树, 之后每次运行都同步覆盖
-if [ ! -d .git ] && command -v git >/dev/null 2>&1 && [ -f huntview.py ]; then
-    K="$PWD/id_huntview"
-    [ -f "$K" ] && chmod 600 "$K" 2>/dev/null
-    export GIT_SSH_COMMAND="ssh -i \"$K\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-    echo "↻ 首次接管为 GitHub 同步版…"
-    git init -q -b main && git remote add origin git@github.com:204343414/Hunt1896PAK.git 2>/dev/null
-    git fetch -q --depth 1 origin main 2>/dev/null && git reset -q --hard FETCH_HEAD && \
-        echo "✓ 已接入 GitHub 自动更新(v$(cat VERSION 2>/dev/null))" || echo "(接管失败, 本次按本地文件跑)"
+ORIGIN="https://github.com/204343414/Hunt1896PAK.git"
+
+# 公开仓走 HTTPS, 不需要 SSH 私钥。有 id_huntview 才启用 SSH(维护端推送用)。
+if [ -f "$PWD/id_huntview" ]; then
+    chmod 600 "$PWD/id_huntview" 2>/dev/null
+    export GIT_SSH_COMMAND="ssh -i \"$PWD/id_huntview\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    ORIGIN="git@github.com:204343414/Hunt1896PAK.git"
 fi
-# 之后每次: 若 git 追踪中 → 同步 GitHub 最新版(版本不同就整包覆盖)
+
+# 半残 .git(无 commit / HEAD 字面量) → 丢掉重建
 if [ -d .git ] && command -v git >/dev/null 2>&1; then
-    K="$PWD/id_huntview"
-    [ -f "$K" ] && chmod 600 "$K" 2>/dev/null
-    export GIT_SSH_COMMAND="ssh -i \"$K\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-    git remote get-url origin 2>/dev/null | grep -q git@ || \
-        git remote set-url origin git@github.com:204343414/Hunt1896PAK.git 2>/dev/null
+    if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+        echo "↻ 本地 git 半残, 重建…"
+        rm -rf .git
+    fi
+fi
+
+sync_gh() {
+    git remote remove origin >/dev/null 2>&1 || true
+    git remote add origin "$ORIGIN" >/dev/null 2>&1 || git remote set-url origin "$ORIGIN"
+    git fetch --depth 1 origin main && git reset --hard FETCH_HEAD
+}
+
+# zip 解压版 / 重建后: 接管为 git 工作树
+if [ ! -d .git ] && command -v git >/dev/null 2>&1 && [ -f huntview.py ]; then
+    echo "↻ 首次接管为 GitHub 同步版…"
+    git init -q
+    git checkout -q -b main 2>/dev/null || true
+    if sync_gh >/dev/null 2>&1; then
+        echo "✓ 已接入 GitHub 自动更新(v$(cat VERSION 2>/dev/null))"
+    else
+        echo "(接管失败, 本次按本地文件跑)"
+    fi
+fi
+
+# 已有 git → 同步最新
+if [ -d .git ] && command -v git >/dev/null 2>&1 && git rev-parse --verify HEAD >/dev/null 2>&1; then
+    git remote get-url origin >/dev/null 2>&1 || git remote add origin "$ORIGIN"
+    git remote set-url origin "$ORIGIN" >/dev/null 2>&1
     OLD=$(git rev-parse HEAD 2>/dev/null)
     V0=$(cat VERSION 2>/dev/null)
-    if git pull --ff-only -q origin main 2>/dev/null; then
+    if git fetch -q origin main 2>/dev/null && git merge --ff-only -q FETCH_HEAD 2>/dev/null; then
         NEW=$(git rev-parse HEAD 2>/dev/null)
         V1=$(cat VERSION 2>/dev/null)
         if [ "$OLD" != "$NEW" ]; then
             echo "⬆ 已从 GitHub 更新: ${V0:-?} → ${V1:-?}"
-            git -C . diff --name-only "$OLD" "$NEW" | grep -q '^start\.sh$' && \
+            git diff --name-only "$OLD" "$NEW" | grep -q '^start\.sh$' && \
                 echo "⚠ 启动器自己也更新了, 建议退出重跑一次: bash start.sh"
         else
             echo "✓ 版本 ${V1:-?} (已是最新)"

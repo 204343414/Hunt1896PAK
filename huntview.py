@@ -878,7 +878,7 @@ button.on{background:#6b5a33;color:#ffe9a8}
 <div id="main"><canvas id="cv"></canvas>
  <div id="top"><span class="grow"><b id="cur">未选择</b><span id="info"></span></span>
   <button id="bwire">线框</button><button id="bbone" class="on">骨架</button><button id="btex" class="on">贴图</button>
-  <button id="breset">复位</button><button id="bglb" style="display:none">导出 glTF</button><button id="bdl" style="display:none">下载原始文件</button></div>
+  <button id="bshot" title="截图">📷</button><button id="breset">复位</button><button id="bglb" style="display:none">导出 glTF</button><button id="bdl" style="display:none">下载原始文件</button></div>
  <div id="msg">← 左边点开目录或搜索<br>角色模型在 characters/ · 武器在 characters/weapons/<br>静态物件在 objects/</div>
  <div id="anim" style="display:none"><h2>🎞️ 相关动画</h2><div id="anims"></div></div>
  <div id="player"><span id="pname"></span><br><audio id="ap" controls autoplay></audio></div>
@@ -897,8 +897,10 @@ button.on{background:#6b5a33;color:#ffe9a8}
  <div id="tvbody" style="display:flex;flex-wrap:wrap;gap:10px"></div></div>
 </div>
 <script>
-const cv=document.getElementById('cv'),gl=cv.getContext('webgl',{antialias:true});
-function rs(){cv.width=cv.clientWidth;cv.height=cv.clientHeight;gl.viewport(0,0,cv.width,cv.height)}addEventListener('resize',rs);rs();
+window.onerror=function(m,s,l){var e=document.getElementById('msg');if(e){e.style.display='';e.style.pointerEvents='auto';e.textContent='JS错误: '+m+' @'+l}};
+const cv=document.getElementById('cv'),gl=cv.getContext('webgl',{antialias:true})||cv.getContext('experimental-webgl');
+if(!gl){document.getElementById('msg').textContent='WebGL 不可用, 换 Chrome/Firefox(目录树仍应能显示)';}
+function rs(){if(!gl)return;cv.width=cv.clientWidth;cv.height=cv.clientHeight;gl.viewport(0,0,cv.width,cv.height)}addEventListener('resize',rs);rs();
 const VS=`attribute vec3 p;attribute vec3 n;attribute vec2 uv;uniform mat4 mvp;uniform mat4 mv;varying vec3 N;varying vec2 UV;varying vec3 VP;
 void main(){gl_Position=mvp*vec4(p,1.);VP=(mv*vec4(p,1.)).xyz;N=mat3(mv)*n;UV=uv;}`;
 const FS=`#extension GL_OES_standard_derivatives:enable
@@ -1040,9 +1042,9 @@ function draw(){
  a.href=cv.toDataURL('image/png');a.download=(curPath?curPath.replace(/[\\\/]/g,'_'):'shot')+'.png';a.click()}catch(e){}}
  requestAnimationFrame(draw);
 }
-let wantShot=false;
-draw();
-document.getElementById('bshot').onclick=()=>{wantShot=true;};
+let wantShot=false,curPath='';
+if(gl)draw();
+var _bs=document.getElementById('bshot');if(_bs)_bs.onclick=()=>{wantShot=true;};
 // ── 目录树/搜索/加载 ──
 const tree=document.getElementById('tree'),msg=document.getElementById('msg');
 const PREV=/\.(chr|skin|skinm|cgf|cgfm|cga|cdf)$/i,AUD=/\.wem$/i,BNK=/\.bnk$/i,MTLV=/\.mtl$/i,DDV=/\.dds$/i;
@@ -1093,7 +1095,7 @@ function fileRow(f){
 const player=document.getElementById('player'),ap=document.getElementById('ap');
 let sibFiles=[],sibIdx=-1;
 async function openPath(path, append){
- document.getElementById('cur').textContent=path;
+ curPath=path;document.getElementById('cur').textContent=path;
  if(!append){
   const dir=path.split('/').slice(0,-1).join('/');
   try{const L=await jget('/api/ls?dir='+encodeURIComponent(dir));
@@ -1137,12 +1139,17 @@ function makeDir(path,name){
  d.querySelector('label').onclick=async()=>{
   d.classList.toggle('open');
   if(!loaded){loaded=true;kids.innerHTML='<div class="file">加载中…</div>';
-   const L=await jget('/api/ls?dir='+encodeURIComponent(path));kids.innerHTML='';
+   try{const L=await jget('/api/ls?dir='+encodeURIComponent(path));kids.innerHTML='';
    for(const sub of L.dirs)kids.appendChild(makeDir(path?path+'/'+sub:sub,sub));
-   for(const f of L.files)kids.appendChild(fileRow(f));}};
+   for(const f of L.files)kids.appendChild(fileRow(f));}catch(e){kids.innerHTML='<div class="file">加载失败: '+e+'</div>'}}};
  return d}
-(async()=>{const L=await jget('/api/ls?dir=');for(const d of L.dirs)tree.appendChild(makeDir(d,d));
- for(const f of L.files)tree.appendChild(fileRow(f));})();
+async function fillTree(){
+ try{const L=await jget('/api/ls?dir=');tree.innerHTML='';
+  for(const d of L.dirs)tree.appendChild(makeDir(d,d));
+  for(const f of L.files)tree.appendChild(fileRow(f));
+  if(!L.dirs.length&&!L.files.length){msg.style.display='';msg.textContent='索引根目录是空的';}
+ }catch(e){msg.style.display='';msg.style.pointerEvents='auto';msg.textContent='目录树加载失败: '+e}}
+fillTree();
 let stimer=null;
 document.getElementById('search').oninput=e=>{
  clearTimeout(stimer);const q=e.target.value.trim();
@@ -1156,14 +1163,13 @@ document.getElementById('search').oninput=e=>{
    row.style.whiteSpace='normal';row.onclick=()=>{document.querySelectorAll('.file.sel').forEach(x=>x.classList.remove('sel'));row.classList.add('sel');openPath(h.path)};tree.appendChild(row)}
   tree.dataset.search='1';
  },350);};
-document.getElementById('search').addEventListener('keydown',e=>{if(e.key==='Escape'){e.target.value='';tree.innerHTML='';(async()=>{const L=await jget('/api/ls?dir=');for(const d of L.dirs)tree.appendChild(makeDir(d,d));for(const f of L.files)tree.appendChild(fileRow(f));})()}});
+document.getElementById('search').addEventListener('keydown',e=>{if(e.key==='Escape'){e.target.value='';fillTree()}});
 document.getElementById('bwire').onclick=e=>{wire=e.target.classList.toggle('on')};
 document.getElementById('bbone').onclick=e=>{showBones=e.target.classList.toggle('on')};
 document.getElementById('btex').onclick=e=>{texOn=e.target.classList.toggle('on')};
 document.getElementById('breset').onclick=()=>{rot=[.6,.8];dist=span*1.8;pan=[0,0,0]};
 // ── 快捷入口 ──
-document.getElementById('qaux').onclick=e=>{showAux=e.target.classList.toggle('on');
- document.getElementById('tree').innerHTML='';jget('/api/ls?dir=').then(L=>{for(const d of L.dirs)tree.appendChild(makeDir(d,d));for(const f of L.files)tree.appendChild(fileRow(f));})};
+document.getElementById('qaux').onclick=e=>{showAux=e.target.classList.toggle('on');fillTree()};
 async function openDir(path){
  let dir=tree;const segs=path.split('/');
  for(let i=0;i<segs.length;i++){
@@ -1339,8 +1345,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if u.path == '/':
                 return self._send(SPA, extra={'Cache-Control': 'no-cache'})
-            if u.path == '/api/ls':
-                return self._json(IDX.ls(q.get('dir', [''])[0]))
+            if u.path in ('/api/ls', '/api/dir'):
+                return self._json(IDX.ls(q.get('dir', q.get('path', ['']))[0]))
             if u.path == '/api/search':
                 return self._json(IDX.search(q.get('q', [''])[0]))
             if u.path == '/api/model':

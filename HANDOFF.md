@@ -1,7 +1,8 @@
 # HANDOFF — Hunt: Showdown 资产预览器项目交接
 > 写给下一个接手工作的 LLM/助手。读这份+PLAN.md+README.txt 就能接着干。
-> **代码仓库: git@github.com:204343414/Hunt1896PAK.git**(私钥=本目录 id_huntview,
-> 勿提交勿贴出)。改动流程: 改 /home/user/huntview/ → git add/commit → `GIT_SSH_COMMAND="ssh -i id_huntview -o IdentitiesOnly=yes" git push origin main`。
+> **代码仓库:** `https://github.com/204343414/Hunt1896PAK.git` (用户拉代码走 HTTPS, 不需要私钥)
+> 维护端推送: `GIT_SSH_COMMAND="ssh -i id_huntview -o IdentitiesOnly=yes" git push origin main`
+> 私钥=本目录 id_huntview, **勿提交勿贴出**。
 
 ## 项目是什么
 
@@ -50,6 +51,11 @@
 
 ## 已知的坑(排障速查)
 
+0. **UI 有按钮但左边目录树空白**(v1.4) → SPA 里 `getElementById('bshot').onclick`
+   在没有 `#bshot` 按钮时抛错, 画树代码根本没跑到。v1.5 已加按钮+空指针保护+`window.onerror`
+   把 JS 错误写到画面中间。真接口是 `/api/ls?dir=`(也兼容 `/api/dir`)。
+   用户本地半残 `.git`(rev-parse 吐字面 HEAD)+缺私钥 → start.sh 自更新失败。
+   v1.5 start.sh 改走 HTTPS 公开仓, 无 commit 的 .git 会重建。
 1. **demo 502/索引 files=0** → 先看隧道是否活着(curl 根 URL), 再看 Range 支持(curl -I 要
    有 Accept-Ranges), 新版 huntserve.py 已修 send_head 不发头的误判。
 2. **某模型没几何/只有一个三角** → 查该角色的 skinm 在哪个 characters_lods-partN(demo
