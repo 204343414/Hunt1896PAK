@@ -917,10 +917,10 @@ void main(){
  if(useNrm>.5){
   vec4 ns=texture2D(nrm,UV);
   vec3 nts;
-  if(ns.b<0.02&&ns.a>0.98){nts.xy=ns.rg*2.-1.;nts.z=sqrt(max(.04,1.-dot(nts.xy,nts.xy)));}
-  else {nts=ns.rgb*2.-1.;if(ns.a<0.98)gloss=ns.a;}
+  nts.xy=ns.rg*2.-1.;
   nts.y=-nts.y;
-  nts=normalize(nts);
+  nts.z=sqrt(max(.001,1.-dot(nts.xy,nts.xy)));
+  if(ns.a<0.99)gloss=ns.a;
   vec3 TT=T;float tl=dot(TT,TT);
   vec3 Btn;
   if(tl>0.01){TT=normalize(TT);Btn=normalize(cross(NN,TT)*Ts);}
@@ -1008,7 +1008,7 @@ function loadModel(D, append){
    let slot=null,slotN=null,slotS=null;const mi=P.mat;
    if(mi>=0&&D.materials&&D.materials[mi]){const MM=D.materials[mi];
     if(MM.diffuse)slot=loadTex('/api/tex?path='+encodeURIComponent(MM.diffuse));
-    if(MM.bump)slotN=loadTex('/api/tex?path='+encodeURIComponent(MM.bump),true);
+    if(MM.bump)slotN=loadTex('/api/tex?path='+encodeURIComponent(MM.bump));
     if(MM.spec)slotS=loadTex('/api/tex?path='+encodeURIComponent(MM.spec));}
    parts.push({ib:pib,n:P.count,tex:slot,nre:slotN,spe:slotS});}
   models.push({pb,ib,nb,tb,uvb,wb,n:idx.length,mn,mx,col,parts});}
