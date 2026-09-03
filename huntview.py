@@ -877,7 +877,7 @@ button.on{background:#6b5a33;color:#ffe9a8}
 </div>
 <div id="main"><canvas id="cv"></canvas>
  <div id="top"><span class="grow"><b id="cur">未选择</b><span id="info"></span></span>
-  <button id="bwire">线框</button><button id="bbone" class="on">骨架</button><button id="btex" class="on">贴图</button>
+  <button id="bwire">线框</button><button id="bbone" class="on">骨架</button><button id="btex" class="on">贴图</button><button id="bnrm" class="on">法线</button><button id="bspec">高光</button>
   <button id="bshot" title="截图">📷</button><button id="breset">复位</button><button id="bglb" style="display:none">导出 glTF</button><button id="bdl" style="display:none">下载原始文件</button></div>
  <div id="msg">← 左边点开目录或搜索<br>角色模型在 characters/ · 武器在 characters/weapons/<br>静态物件在 objects/</div>
  <div id="anim" style="display:none"><h2>🎞️ 相关动画</h2><div id="anims"></div></div>
@@ -909,18 +909,27 @@ uniform vec3 col;uniform float useTex;uniform sampler2D tex;
 uniform float useNrm;uniform sampler2D nrm;uniform float useSpec;uniform sampler2D spec;
 void main(){
  vec3 NN=normalize(N);
- if(useNrm>.5){vec3 t=texture2D(nrm,UV).rgb*2.-1.;t.z=sqrt(max(.04,1.-dot(t.xy,t.xy)));
+ float gloss=.16;
+ if(useNrm>.5){
+  vec4 ns=texture2D(nrm,UV);
+  vec2 xy=(ns.a<0.985)?vec2(ns.a,ns.g):ns.rg;
+  if(ns.a<0.985)gloss=ns.a;
+  vec3 t=vec3(xy*2.-1.,1.);
+  t.z=sqrt(max(.04,1.-dot(t.xy,t.xy)));
   vec3 q0=dFdx(VP),q1=dFdy(VP);vec2 s0=dFdx(UV),s1=dFdy(UV);
-  vec3 T=normalize(q0*s1.t-q1*s0.t);vec3 B=normalize(cross(NN,T));
-  NN=normalize(T*t.x+B*t.y+NN*t.z);}
+  vec3 S=q0*s1.t-q1*s0.t;
+  S=normalize(S-NN*dot(NN,S));
+  vec3 B=cross(NN,S);
+  float hnd=sign(s0.s*s1.t-s1.s*s0.t);if(hnd==0.)hnd=1.;B*=hnd;
+  NN=normalize(S*t.x+B*t.y+NN*t.z);}
  vec3 V=normalize(-VP);
  vec3 L1=normalize(vec3(.42,.72,.55)),L2=normalize(vec3(-.55,.15,-.6));
  vec3 base=col;
- if(useTex>.5){vec4 c=texture2D(tex,UV);if(c.a<.33)discard;base=c.rgb;}
- float dif=clamp(dot(NN,L1),0.,1.)*.72+clamp(dot(NN,L2),0.,1.)*.28+.20;
- float sp=useSpec>.5?texture2D(spec,UV).r:.3;
- float h=pow(clamp(dot(reflect(-L1,NN),V),0.,1.),mix(10.,56.,sp))*sp*1.5;
- vec3 o=base*dif+vec3(h)*.8+base*.045;
+ if(useTex>.5){vec4 c=texture2D(tex,UV);if(c.a<.08)discard;base=c.rgb;}
+ if(useSpec>.5){vec4 s=texture2D(spec,UV);gloss=s.a>0.02?s.a:s.r;}
+ float dif=clamp(dot(NN,L1),0.,1.)*.62+clamp(dot(NN,L2),0.,1.)*.22+.20;
+ float h=pow(clamp(dot(reflect(-L1,NN),V),0.,1.),mix(6.,36.,gloss))*gloss*.4;
+ vec3 o=base*dif+vec3(h)+base*.03;
  gl_FragColor=vec4(o,1.);}`;
 const DERIV=gl.getExtension('OES_standard_derivatives');
 const LVS=`attribute vec3 p;uniform mat4 mvp;void main(){gl_Position=mvp*vec4(p,1.);}`;
@@ -929,14 +938,16 @@ function prog(v,f){const P=gl.createProgram();for(const[t,s]of[[gl.VERTEX_SHADER
 gl.getExtension('OES_element_index_uint');
 const P=prog(VS,FS),LP=prog(LVS,LFS);gl.enable(gl.DEPTH_TEST);
 let rot=[.6,.8],dist=6,pan=[0,0,0],drag=null;
-cv.onmousedown=e=>drag={x:e.clientX,y:e.clientY,b:e.button,rot:[...rot]};
+cv.onmousedown=e=>{drag={x:e.clientX,y:e.clientY,b:e.button,rot:[...rot],pan:[...pan]};e.preventDefault()};
 onmousemove=e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
-if(drag.b===2){pan[0]+=dx*dist*.0016;pan[1]-=dy*dist*.0016}else rot=[drag.rot[0]+dy*.008,drag.rot[1]+dx*.008]};
-onmouseup=()=>drag=null;cv.oncontextmenu=e=>e.preventDefault();
+ if(drag.b===2){pan=[drag.pan[0]+dx*dist*.0016,drag.pan[1]-dy*dist*.0016,0]}
+ else rot=[Math.max(-1.35,Math.min(1.35,drag.rot[0]+dy*.008)),drag.rot[1]+dx*.008]};
+onmouseup=()=>drag=null;
+cv.oncontextmenu=e=>e.preventDefault();
 cv.onwheel=e=>{dist*=e.deltaY>0?1.12:.89;e.preventDefault()};
 function mul(a,b){const r=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++)for(let k=0;k<4;k++)r[j*4+i]+=a[k*4+i]*b[j*4+k];return r}
 function persp(f,a,n,fr){const t=1/Math.tan(f/2);return new Float32Array([t/a,0,0,0,0,t,0,0,0,0,(fr+n)/(n-fr),-1,0,0,2*fr*n/(n-fr),0])}
-let models=[],boneBuf=null,boneN=0,showBones=true,wire=false,texOn=true,span=1,ctr=[0,0,0];
+let models=[],boneBuf=null,boneN=0,showBones=true,wire=false,texOn=true,nrmOn=true,specOn=false,span=1,ctr=[0,0,0];
 const texCache={},rawCache={};
 function fetchRaw(url){
  if(!rawCache[url])rawCache[url]=fetch(url).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer()})
@@ -1003,7 +1014,7 @@ function draw(){
  eye[0]+=pan[0]*rt[0];eye[2]+=pan[0]*rt[2];eye[1]+=pan[1];
  const tg=[ctr[0]+pan[0]*rt[0],ctr[1]+pan[1],ctr[2]+pan[0]*rt[2]];
  let f=[tg[0]-eye[0],tg[1]-eye[1],tg[2]-eye[2]];const fl=Math.hypot(...f)||1;f=f.map(v=>v/fl);
- let r=[f[2],0,-f[0]];const rl=Math.hypot(...r)||1;r=r.map(v=>v/rl);
+ let r=[f[2],0,-f[0]];const rl=Math.hypot(...r);r=rl<1e-5?[1,0,0]:r.map(v=>v/rl);
  const u=[r[1]*f[2]-r[2]*f[1],r[2]*f[0]-r[0]*f[2],r[0]*f[1]-r[1]*f[0]];
  const vw=new Float32Array([r[0],u[0],-f[0],0,r[1],u[1],-f[1],0,r[2],u[2],-f[2],0,-(r[0]*eye[0]+r[1]*eye[1]+r[2]*eye[2]),-(u[0]*eye[0]+u[1]*eye[1]+u[2]*eye[2]),f[0]*eye[0]+f[1]*eye[1]+f[2]*eye[2],1]);
  const mvp=mul(pr,vw);
@@ -1028,9 +1039,9 @@ function draw(){
    const t=P.tex&&P.tex.tex,tn=P.nre&&P.nre.tex,ts=P.spe&&P.spe.tex;
    if(t&&texOn){gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1f(uUT,1)}
    else gl.uniform1f(uUT,0);
-   if(tn&&texOn){gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,tn);gl.uniform1f(uUN,1)}
+   if(tn&&nrmOn){gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,tn);gl.uniform1f(uUN,1)}
    else gl.uniform1f(uUN,0);
-   if(ts&&texOn){gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,ts);gl.uniform1f(uUS,1)}
+   if(ts&&specOn){gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,ts);gl.uniform1f(uUS,1)}
    else gl.uniform1f(uUS,0);
    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,P.ib);
    gl.drawElements(gl.TRIANGLES,P.n,gl.UNSIGNED_INT,0);}}
@@ -1167,6 +1178,8 @@ document.getElementById('search').addEventListener('keydown',e=>{if(e.key==='Esc
 document.getElementById('bwire').onclick=e=>{wire=e.target.classList.toggle('on')};
 document.getElementById('bbone').onclick=e=>{showBones=e.target.classList.toggle('on')};
 document.getElementById('btex').onclick=e=>{texOn=e.target.classList.toggle('on')};
+document.getElementById('bnrm').onclick=e=>{nrmOn=e.target.classList.toggle('on')};
+document.getElementById('bspec').onclick=e=>{specOn=e.target.classList.toggle('on')};
 document.getElementById('breset').onclick=()=>{rot=[.6,.8];dist=span*1.8;pan=[0,0,0]};
 // ── 快捷入口 ──
 document.getElementById('qaux').onclick=e=>{showAux=e.target.classList.toggle('on');fillTree()};
@@ -1238,7 +1251,7 @@ async function renderThumb(D,g){
  const eye=[ctr[0]+dist*Math.cos(rx)*Math.sin(ry),ctr[1]+dist*Math.sin(rx),ctr[2]+dist*Math.cos(rx)*Math.cos(ry)];
  const pr=persp(.85,1,.005,Math.max(100,span*10));
  let f=[ctr[0]-eye[0],ctr[1]-eye[1],ctr[2]-eye[2]];const fl=Math.hypot(...f)||1;f=f.map(v=>v/fl);
- let r=[f[2],0,-f[0]];const rl=Math.hypot(...r)||1;r=r.map(v=>v/rl);
+ let r=[f[2],0,-f[0]];const rl=Math.hypot(...r);r=rl<1e-5?[1,0,0]:r.map(v=>v/rl);
  const u=[r[1]*f[2]-r[2]*f[1],r[2]*f[0]-r[0]*f[2],r[0]*f[1]-r[1]*f[0]];
  const vw=new Float32Array([r[0],u[0],-f[0],0,r[1],u[1],-f[1],0,r[2],u[2],-f[2],0,-(r[0]*eye[0]+r[1]*eye[1]+r[2]*eye[2]),-(u[0]*eye[0]+u[1]*eye[1]+u[2]*eye[2]),f[0]*eye[0]+f[1]*eye[1]+f[2]*eye[2],1]);
  const mvp=mul(pr,vw);
