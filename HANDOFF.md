@@ -1,5 +1,6 @@
 # HANDOFF — Hunt: Showdown 资产预览器项目交接
-> 写给下一个接手工作的 LLM/助手。读这份+PLAN.md+README.txt 就能接着干。
+> **2026-09-03 归档。** 用户疲劳停工。先读 `ARCHIVE.md`。
+> 写给下一个接手的 LLM/助手。未明确回头时：不要再做法线、音频、骨架预览补丁。
 > **代码仓库:** `https://github.com/204343414/Hunt1896PAK.git` (用户拉代码走 HTTPS, 不需要私钥)
 > 维护端推送: `GIT_SSH_COMMAND="ssh -i id_huntview -o IdentitiesOnly=yes" git push origin main`
 > 私钥=本目录 id_huntview, **勿提交勿贴出**。
