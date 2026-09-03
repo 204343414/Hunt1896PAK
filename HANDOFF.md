@@ -65,9 +65,10 @@
 4. **JSON 解析失败空响应** → 往往是 curl 超时截断, 不是服务器错; 加 -m 300+。
 5. **python http.server 不支持 Range** → 隧道侧必须用 huntserve.py(带 Range)。
 6. 大改 SPA 后浏览器要**强刷**(已对 / 响应加 Cache-Control: no-cache)。
-7. **全模型一层泥污/湿塑料**(v1.4-1.5) → 不是烧尸遮罩。原因: DDNA 法线当 RGB 解 +
-   屏幕微分 TBN 噪 + spec.r 当高光。v1.6: Cry AG/RG 解包、TBN 正交、高光默认关,
-   顶栏拆 贴图/法线/高光。关「法线」若立刻干净 = 通道还要对; 关了还脏 = 漫反射自带做旧。
+7. **全模型一层泥污**(关「法线」就干净) → 不是烧尸/不是漫反射。官方 DDNA:
+   RGB=切线法线, A=gloss, 轴向 X+Y-Z+; BC5 则 RG=XY 重建 Z。
+   v1.6 误用 DXT5nm 的 AG + 屏幕微分 TBN → 仍脏。
+   v1.7 通用公式: 贴图按 DDNA/BC5 解 + 顶点 QTangent 出 TBN(N=q·Z, T=q·X, B=cross*sign(w))。
 8. **右键平移单向飞、俯仰卡死** → pan 每帧累加「相对按下点」的全量位移; pitch 不夹紧过 ±90°。
    v1.6 改为绝对位移+俯仰夹紧。
 
