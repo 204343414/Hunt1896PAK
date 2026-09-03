@@ -872,6 +872,7 @@ button.on{background:#6b5a33;color:#ffe9a8}
   <button class="q" id="qmob">👹 怪物</button>
   <button class="q" id="qprop">📦 物件</button>
   <button class="q" id="qshelf">🧺 物品栏</button>
+  <button class="q" id="qaud">🎵 音频</button>
   <button class="q" id="qaux">🗃️ 显示杂件</button>
  </div>
  <div id="hint">左键旋转·右键平移·滚轮缩放 · <b>Shift+点文件=叠加拼装</b></div>
@@ -879,7 +880,7 @@ button.on{background:#6b5a33;color:#ffe9a8}
 </div>
 <div id="main"><canvas id="cv"></canvas>
  <div id="top"><span class="grow"><b id="cur">未选择</b><span id="info"></span></span>
-  <button id="bwire">线框</button><button id="bbone" class="on">骨架</button><button id="btex" class="on">贴图</button><button id="bnrm" class="on">法线</button><button id="bspec">高光</button><button id="bdbg">原法线</button>
+  <button id="bwire">线框</button><button id="bbone" class="on">骨架</button><button id="btex" class="on">贴图</button><button id="bnrm">法线</button><button id="bspec">高光</button><button id="bdbg">原法线</button>
   <button id="bshot" title="截图">📷</button><button id="breset">复位</button><button id="bglb" style="display:none">导出 glTF</button><button id="bdl" style="display:none">下载原始文件</button></div>
  <div id="msg">← 左边点开目录或搜索<br>角色模型在 characters/ · 武器在 characters/weapons/<br>静态物件在 objects/</div>
  <div id="anim" style="display:none"><h2>🎞️ 相关动画</h2><div id="anims"></div></div>
@@ -949,7 +950,7 @@ cv.oncontextmenu=e=>e.preventDefault();
 cv.onwheel=e=>{dist*=e.deltaY>0?1.12:.89;e.preventDefault()};
 function mul(a,b){const r=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++)for(let k=0;k<4;k++)r[j*4+i]+=a[k*4+i]*b[j*4+k];return r}
 function persp(f,a,n,fr){const t=1/Math.tan(f/2);return new Float32Array([t/a,0,0,0,0,t,0,0,0,0,(fr+n)/(n-fr),-1,0,0,2*fr*n/(n-fr),0])}
-let models=[],boneBuf=null,boneN=0,showBones=true,wire=false,texOn=true,nrmOn=true,specOn=false,dbgNrm=false,span=1,ctr=[0,0,0];
+let models=[],boneBuf=null,boneN=0,showBones=true,wire=false,texOn=true,nrmOn=false,specOn=false,dbgNrm=false,span=1,ctr=[0,0,0];
 const texCache={},rawCache={};
 function fetchRaw(url){
  if(!rawCache[url])rawCache[url]=fetch(url).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer()})
@@ -1099,6 +1100,7 @@ async function showDds(path){tvShow('🖼️ '+path.split('/').pop());
   document.getElementById('tvbody').appendChild(ca);}catch(e){document.getElementById('tvbody').innerHTML='<small style="color:#a66">'+e+'</small>'}}
 addEventListener('keydown',e=>{
  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+ if(e.code==='Space'&&player.style.display!=='none'){e.preventDefault();ap.paused?ap.play():ap.pause();return}
  if(e.key==='Escape')document.getElementById('texview').style.display='none';
  if((e.key==='ArrowDown'||e.key==='ArrowUp')&&sibFiles.length){
   e.preventDefault();
@@ -1141,7 +1143,19 @@ async function openPath(path, append){
   document.getElementById('pname').textContent=path.split('/').pop();
   return;
  }
- if(BNK.test(path)){msg.style.display='';msg.innerHTML='📀 .bnk 是 Wwise 容器(内部可含多个 wem)<br>二期支持在线解;眼下可先点"下载原始文件"';return}
+ if(/\.dba$/i.test(path)){
+  msg.style.display='';msg.textContent='扫描动画库…';
+  try{const D=await jget('/api/dba?path='+encodeURIComponent(path));
+   const pane=document.getElementById('anim'),box=document.getElementById('anims');
+   pane.style.display='';
+   box.innerHTML=`<small>${path}</small><h2>库内片段(${D.names.length})</h2>`
+    +(D.names.length?D.names.map(n=>`<div class="a" data-p="${n}" title="${n}">🎬 ${n.split('/').pop()}</div>`).join(''):'<div class="a">(没扫到片段名, 关键帧解码还没做)</div>');
+   box.onclick=e=>{const a=e.target.closest('.a');if(!a||!a.dataset.p)return;
+    const s=document.getElementById('search');s.value=a.dataset.p.split('/').pop();s.dispatchEvent(new Event('input'));};
+   msg.style.display='';msg.innerHTML='📼 <b>.dba 是动画打包库</b><br>右侧是扫到的片段名(点一下可搜索)<br><small>关键帧播放下一刀再做, 现在先能点名/听音</small>';
+  }catch(e){msg.textContent='dba 读取失败: '+e}
+  return;}
+ if(BNK.test(path)){msg.style.display='';msg.innerHTML='📀 .bnk 是 Wwise 容器(内部可含多个 wem)<br>点左边搜 .wem 可直接听; 容器解包还没做';return}
  if(PREV.test(path)){
   msg.style.display='';msg.textContent='解析中…';
   try{const D=(append?await mergeModel(path):await jget('/api/model?path='+encodeURIComponent(path)));
@@ -1152,10 +1166,13 @@ async function openPath(path, append){
  try{const A=await jget('/api/anims?path='+encodeURIComponent(path));
   const pane=document.getElementById('anim'),box=document.getElementById('anims');
   if(A.found&&(A.anims.length||A.files.length||(A.clips&&A.clips.length))){pane.style.display='';
-   box.innerHTML=`<small>骨架: ${A.chr}</small>`
-    +(A.clips&&A.clips.length?`<h2>动作清单(${A.clips.length})</h2>`+A.clips.map(c=>{const nm=c.split('/').pop().replace(/\.(bspace|comb|caf)$/,'');return `<div class="a" title="${c}">🎬 ${nm}</div>`}).join(''):'')
-    +(A.anims.length?'<h2>命名动画</h2>'+A.anims.map(a=>`<div class="a" title="${a.dba}">▸ ${a.name}</div>`).join(''):'')
-    +(A.files&&A.files.length?'<h2>动画库文件</h2>'+A.files.map(f=>`<div class="a" title="${f.path}">📼 ${f.path.split('/').pop()} <small>${(f.size/1024).toFixed(0)}KB</small></div>`).join(''):'');
+   box.innerHTML=`<small>骨架: ${A.chr||''}</small>`
+    +(A.clips&&A.clips.length?`<h2>动作清单(${A.clips.length})</h2>`+A.clips.map(c=>{const nm=c.split('/').pop().replace(/\.(bspace|comb|caf)$/,'');return `<div class="a" data-p="${c}" title="${c}">🎬 ${nm}</div>`}).join(''):'')
+    +(A.anims.length?'<h2>命名动画</h2>'+A.anims.map(a=>`<div class="a" data-p="${a.dba||a.name}" title="${a.dba||''}">▸ ${a.name}</div>`).join(''):'')
+    +(A.files&&A.files.length?'<h2>动画库文件</h2>'+A.files.map(f=>`<div class="a" data-p="${f.path}" title="${f.path}">📼 ${f.path.split('/').pop()} <small>${(f.size/1024).toFixed(0)}KB</small></div>`).join(''):'');
+   box.onclick=e=>{const a=e.target.closest('.a');if(!a)return;const p=a.dataset.p||'';
+    if(/\.(dba|caf|wem)$/i.test(p))openPath(p);
+    else {const s=document.getElementById('search');s.value=(p.split('/').pop()||p).replace(/\.(bspace|comb|caf)$/,'');s.dispatchEvent(new Event('input'));}};
   }else pane.style.display='none';}catch(e){}
 }
 function makeDir(path,name){
@@ -1198,6 +1215,7 @@ document.getElementById('bdbg').onclick=e=>{dbgNrm=e.target.classList.toggle('on
 document.getElementById('breset').onclick=()=>{rot=[.6,.8];dist=span*1.8;pan=[0,0,0]};
 // ── 快捷入口 ──
 document.getElementById('qaux').onclick=e=>{showAux=e.target.classList.toggle('on');fillTree()};
+document.getElementById('qaud').onclick=()=>{const s=document.getElementById('search');s.value='.wem';s.dispatchEvent(new Event('input'));};
 async function openDir(path){
  let dir=tree;const segs=path.split('/');
  for(let i=0;i<segs.length;i++){
@@ -1344,6 +1362,36 @@ document.getElementById('qset').onchange=()=>outfit();
 
 # ════════════════════════ HTTP 服务 ════════════════════════
 
+def dba_names(idx, path, limit=400):
+    """从 dba/adb 里扫 ASCII 片段名(不做关键帧解码)."""
+    try:
+        data = idx.read(path)
+    except Exception:
+        return []
+    out, i, n = [], 0, len(data)
+    while i < n:
+        if 45 <= data[i] < 127:      # '-' ../A
+            j = i
+            while j < n and 45 <= data[j] < 127:
+                j += 1
+            if j - i >= 8:
+                s = data[i:j].decode('ascii', 'ignore').replace('\\', '/')
+                sl = s.lower()
+                if sl.endswith(('.caf', '.bspace', '.comb', '.anm')) or '/animations/' in sl:
+                    out.append(s)
+            i = j
+        else:
+            i += 1
+    seen, uniq = set(), []
+    for s in out:
+        k = s.lower()
+        if k not in seen:
+            seen.add(k); uniq.append(s)
+            if len(uniq) >= limit:
+                break
+    return uniq
+
+
 IDX = None
 
 
@@ -1418,6 +1466,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(data, 'application/octet-stream', 200,
                                   {'Content-Disposition':
                                    f"attachment; filename*=UTF-8''{name}"})
+            if u.path == '/api/dba':
+                return self._json({'path': path, 'names': dba_names(IDX, path)})
             if u.path == '/api/stats':
                 return self._json({'files': len(IDX.files),
                                    'paks': len(set(v[0] for v in IDX.files.values()))})
