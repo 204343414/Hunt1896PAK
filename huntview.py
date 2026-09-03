@@ -487,7 +487,7 @@ def model_payload(idx: AssetIndex, path: str):
                 'uv': [c for v in m['uvs'] for c in v],
                 'idx': [i for tri in m['indices'] for i in tri],
                 'parts': parts})
-        if prefer_bones and len(parsed['skeleton']) > len(bones):
+        if len(parsed['skeleton']) > len(bones):
             bones[:] = parsed['skeleton']
         errors.extend(parsed['errors'])
 
@@ -665,7 +665,7 @@ def _assemble_from_attach(idx, cdf, title, default_mtl_d=None):
                 'uv': [c for v in m['uvs'] for c in v],
                 'idx': [i for tri in m['indices'] for i in tri],
                 'parts': parts})
-        if prefer_bones and len(parsed['skeleton']) > len(bones):
+        if len(parsed['skeleton']) > len(bones):
             bones[:] = parsed['skeleton']
         errors.extend(parsed['errors'])
 
@@ -770,18 +770,21 @@ REVORB = os.path.join(HERE, 'revorb')
 AUDIO_TMP = '/tmp/huntview_audio'
 
 
+def _wem_codec(data):
+    i = data.find(b'fmt ')
+    if i < 0 or i + 10 > len(data):
+        return 0, 'unknown'
+    codec = struct.unpack_from('<H', data, i + 8)[0]
+    names = {0xFFFF: 'vorbis', 0x0166: 'xWMA', 0x3040: 'opus', 0x3041: 'opus',
+             1: 'pcm', 2: 'adpcm'}
+    return codec, names.get(codec, 'codec-0x%04x' % codec)
+
+
 def audio_convert(idx: AssetIndex, path: str) -> bytes:
     if not path.lower().endswith('.wem'):
-        raise RuntimeError('只有 .wem 支持在线播放(.bnk 是容器,请先下载原始文件)')
-    if not os.path.exists(WW2OGG):
-        raise RuntimeError('缺少 ww2ogg 可执行文件(应与本程序同目录)')
-    try:
-        os.chmod(WW2OGG, 0o755)
-        if os.path.exists(REVORB):
-            os.chmod(REVORB, 0o755)
-    except OSError:
-        pass
+        raise RuntimeError('只有 .wem 支持在线播放(.bnk 是容器)')
     data = idx.read(path)
+    codec, cname = _wem_codec(data)
     os.makedirs(AUDIO_TMP, exist_ok=True)
     key = hashlib.md5(str(len(data)).encode() + data[:2048]).hexdigest()[:16]
     ogg = os.path.join(AUDIO_TMP, key + '.ogg')
@@ -789,33 +792,72 @@ def audio_convert(idx: AssetIndex, path: str) -> bytes:
     def valid(p):
         try:
             with open(p, 'rb') as f:
-                return f.read(4) == b'OggS' and os.path.getsize(p) > 64
+                mag = f.read(4)
+                return mag in (b'OggS', b'RIFF', b'fLaC') and os.path.getsize(p) > 64
         except OSError:
             return False
 
-    if not valid(ogg):
-        wem = ogg + '.wem'
-        with open(wem, 'wb') as f:
-            f.write(data)
-        ok = False
-        last_err = ''
+    if valid(ogg):
+        with open(ogg, 'rb') as f:
+            return f.read()
+
+    wem = ogg + '.wem'
+    with open(wem, 'wb') as f:
+        f.write(data)
+    errs = []
+    try:
+        os.chmod(WW2OGG, 0o755)
+    except OSError:
+        pass
+    # 1) ww2ogg (旧 Vorbis)
+    if os.path.exists(WW2OGG) and cname == 'vorbis':
         for flags in ([], ['--no-mod-packets'], ['--mod-packets'],
                       ['--inline-codebooks']):
             if os.path.exists(ogg):
-                os.remove(ogg)
+                try:
+                    os.remove(ogg)
+                except OSError:
+                    pass
             r = subprocess.run([WW2OGG, wem, '-o', ogg] + flags,
                                capture_output=True, timeout=180, cwd=HERE)
-            last_err = (r.stderr or r.stdout).decode('utf-8', 'replace')[:200]
             if r.returncode == 0 and valid(ogg):
-                ok = True
-                break
+                os.remove(wem)
+                with open(ogg, 'rb') as f:
+                    return f.read()
+            errs.append((r.stderr or r.stdout).decode('utf-8', 'replace')[:120])
+    # 2) ffmpeg (Hunt 新包大量 Opus)
+    ff = shutil.which('ffmpeg')
+    if ff:
+        for out, extra in ((ogg, ['-c:a', 'libvorbis', '-q:a', '4']),
+                           (ogg + '.opus', ['-c:a', 'copy'])):
+            r = subprocess.run(
+                [ff, '-y', '-loglevel', 'error', '-i', wem] + extra + [out],
+                capture_output=True, timeout=180)
+            if r.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 64:
+                try:
+                    os.remove(wem)
+                except OSError:
+                    pass
+                with open(out, 'rb') as f:
+                    return f.read()
+            errs.append('ffmpeg: ' + (r.stderr or b'').decode('utf-8', 'replace')[:120])
+    # 3) vgmstream
+    vg = shutil.which('vgmstream-cli') or shutil.which('vgmstream123')
+    if vg and 'vgmstream-cli' in vg:
+        r = subprocess.run([vg, '-o', ogg, wem], capture_output=True, timeout=180)
+        if r.returncode == 0 and valid(ogg):
+            os.remove(wem)
+            with open(ogg, 'rb') as f:
+                return f.read()
+            errs.append('vgmstream: ' + (r.stderr or b'').decode('utf-8', 'replace')[:120])
+    try:
         os.remove(wem)
-        if not ok:
-            if os.path.exists(ogg):
-                os.remove(ogg)
-            raise RuntimeError('ww2ogg 转码失败: ' + last_err)
-    with open(ogg, 'rb') as f:
-        return f.read()
+    except OSError:
+        pass
+    hint = ''
+    if cname == 'opus' and not shutil.which('ffmpeg'):
+        hint = ' 装 ffmpeg: sudo apt install ffmpeg'
+    raise RuntimeError('音频转码失败(%s).%s %s' % (cname, hint, ' | '.join(errs)[:180]))
 
 SPA = r"""<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><title>猎杀对决 · 资产浏览器</title>
@@ -935,7 +977,7 @@ void main(){
  vec3 o=base*dif+vec3(h)+base*.03;
  gl_FragColor=vec4(o,1.);}`;
 const DERIV=gl.getExtension('OES_standard_derivatives');
-const LVS=`attribute vec3 p;uniform mat4 mvp;void main(){gl_Position=mvp*vec4(p,1.);}`;
+const LVS=`attribute vec3 p;uniform mat4 mvp;void main(){gl_Position=mvp*vec4(p,1.);gl_PointSize=7.;}`;
 const LFS=`precision mediump float;void main(){gl_FragColor=vec4(1.,.35,.55,1.);}`;
 function prog(v,f){const P=gl.createProgram();for(const[t,s]of[[gl.VERTEX_SHADER,v],[gl.FRAGMENT_SHADER,f]]){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);gl.attachShader(P,sh);}gl.linkProgram(P);return P;}
 gl.getExtension('OES_element_index_uint');
@@ -950,7 +992,7 @@ cv.oncontextmenu=e=>e.preventDefault();
 cv.onwheel=e=>{dist*=e.deltaY>0?1.12:.89;e.preventDefault()};
 function mul(a,b){const r=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++)for(let k=0;k<4;k++)r[j*4+i]+=a[k*4+i]*b[j*4+k];return r}
 function persp(f,a,n,fr){const t=1/Math.tan(f/2);return new Float32Array([t/a,0,0,0,0,t,0,0,0,0,(fr+n)/(n-fr),-1,0,0,2*fr*n/(n-fr),0])}
-let models=[],boneBuf=null,boneN=0,showBones=true,wire=false,texOn=true,nrmOn=false,specOn=false,dbgNrm=false,span=1,ctr=[0,0,0];
+let models=[],boneBuf=null,bonePts=null,boneN=0,boneLn=0,showBones=true,wire=false,texOn=true,nrmOn=false,specOn=false,dbgNrm=false,span=1,ctr=[0,0,0];
 const texCache={},rawCache={};
 function fetchRaw(url){
  if(!rawCache[url])rawCache[url]=fetch(url).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer()})
@@ -1012,10 +1054,12 @@ function loadModel(D, append){
  for(const m of models)for(let a=0;a<3;a++){allmn[a]=Math.min(allmn[a],m.mn[a]);allmx[a]=Math.max(allmx[a],m.mx[a])}
  if(models.length){ctr=[(allmn[0]+allmx[0])/2,(allmn[1]+allmx[1])/2,(allmn[2]+allmx[2])/2];
   span=Math.max(.05,...allmx.map((v,i)=>v-allmn[i]));dist=span*1.8;pan=[0,0,0];rot=[.6,.8]}
- if(D.bones&&D.bones.length){const L=[];
-  for(let i=0;i<D.bones.length;i++){const b=D.bones[i];if(b.parentOff>0){const p=i-b.parentOff;
-   if(p>=0&&p<D.bones.length){L.push(b.b2w[3],b.b2w[7],b.b2w[11],D.bones[p].b2w[3],D.bones[p].b2w[7],D.bones[p].b2w[11])}}}
-  boneBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,boneBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(L),gl.STATIC_DRAW);boneN=D.bones.length;}
+ if(D.bones&&D.bones.length){const L=[],Pts=[];
+  for(let i=0;i<D.bones.length;i++){const b=D.bones[i],x=b.b2w[3],y=b.b2w[7],z=b.b2w[11];Pts.push(x,y,z);
+   if(b.parentOff>0){const p=i-b.parentOff;
+    if(p>=0&&p<D.bones.length){L.push(x,y,z,D.bones[p].b2w[3],D.bones[p].b2w[7],D.bones[p].b2w[11])}}}
+  boneBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,boneBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(L.length?L:Pts),gl.STATIC_DRAW);
+  bonePts=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,bonePts);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(Pts),gl.STATIC_DRAW);boneN=D.bones.length;boneLn=L.length/3;}
  document.getElementById('info').textContent=` — ${models.length} 网格, ${models.reduce((s,m)=>s+m.n/3,0).toLocaleString()} 面, ${boneN} 骨骼`;
 }
 function draw(){
@@ -1060,10 +1104,11 @@ function draw(){
    else gl.uniform1f(uUS,0);
    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,P.ib);
    gl.drawElements(gl.TRIANGLES,P.n,gl.UNSIGNED_INT,0);}}
- if(showBones&&boneBuf&&boneN){gl.useProgram(LP);
+ if(showBones&&boneN){gl.disable(gl.DEPTH_TEST);gl.useProgram(LP);
   const lm=gl.getUniformLocation(LP,'mvp'),la=gl.getAttribLocation(LP,'p');gl.uniformMatrix4fv(lm,false,mvp);
-  gl.bindBuffer(gl.ARRAY_BUFFER,boneBuf);gl.enableVertexAttribArray(la);gl.vertexAttribPointer(la,3,gl.FLOAT,false,0,0);
-  gl.drawArrays(gl.LINES,0,gl.getBufferParameter(gl.ARRAY_BUFFER,gl.BUFFER_SIZE)/12);}
+  if(bonePts){gl.bindBuffer(gl.ARRAY_BUFFER,bonePts);gl.enableVertexAttribArray(la);gl.vertexAttribPointer(la,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.POINTS,0,boneN);}
+  if(boneBuf&&boneLn){gl.bindBuffer(gl.ARRAY_BUFFER,boneBuf);gl.enableVertexAttribArray(la);gl.vertexAttribPointer(la,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINES,0,boneLn);}
+  gl.enable(gl.DEPTH_TEST);}
  if(wantShot){wantShot=false;try{const a=document.createElement('a');
  a.href=cv.toDataURL('image/png');a.download=(curPath?curPath.replace(/[\\\/]/g,'_'):'shot')+'.png';a.click()}catch(e){}}
  requestAnimationFrame(draw);
@@ -1139,8 +1184,16 @@ async function openPath(path, append){
  if(DDV.test(path)){showDds(path);return}
  if(AUD.test(path)){
   player.style.display='';
-  ap.src='/api/audio?path='+encodeURIComponent(path);
-  document.getElementById('pname').textContent=path.split('/').pop();
+  document.getElementById('pname').textContent=path.split('/').pop()+'  转码中…';
+  msg.style.display='';msg.textContent='音频转码中…';
+  fetch('/api/audio?path='+encodeURIComponent(path)).then(async r=>{
+   if(!r.ok){const t=await r.text();throw new Error(t.slice(0,240));}
+   return r.blob();}).then(b=>{
+   const u=URL.createObjectURL(b);ap.src=u;ap.play().catch(()=>{});
+   document.getElementById('pname').textContent=path.split('/').pop();
+   msg.style.display='none';
+  }).catch(e=>{msg.style.display='';msg.style.pointerEvents='auto';
+   msg.textContent='音频失败: '+e;document.getElementById('pname').textContent=path.split('/').pop()+' ✗';});
   return;
  }
  if(/\.dba$/i.test(path)){

@@ -158,12 +158,22 @@ def export_glb(idx, path, assm, texfun):
                 local = w4[i]
             B.nodes.append({'name': b['name'] or f'bone_{i}', 'matrix': local})
             joint_node.append(len(B.nodes) - 1)
-        # parent 链
+        # parent 链 + 给 0 长度骨头一点尾巴(Blender 否则显示成球)
+        has_child = [False] * len(bones)
         for i, b in enumerate(bones):
             if b['offsetParent'] > 0:
                 p = i - b['offsetParent']
-                pn = joint_node[p]
-                B.nodes[pn].setdefault('children', []).append(joint_node[i])
+                if 0 <= p < len(bones):
+                    has_child[p] = True
+                    pn = joint_node[p]
+                    B.nodes[pn].setdefault('children', []).append(joint_node[i])
+        for i, b in enumerate(bones):
+            nd = B.nodes[joint_node[i]]
+            m = nd['matrix']
+            tl = (m[12] * m[12] + m[13] * m[13] + m[14] * m[14]) ** 0.5
+            if tl < 1e-4:
+                nd['matrix'] = list(m)
+                nd['matrix'][13] = m[13] + 0.05   # 0 长度 → Blender 显示成球
         B.nodes[root].setdefault('children', []).append(joint_node[0])
         # inverse bind matrices
         ibm = []
